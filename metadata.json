@@ -1,0 +1,5 @@
+{
+  "name": "MunzGen AI - Advanced VFX Studio",
+  "description": "A sophisticated, open-source inspired AI VFX platform for movie editing, scene generation, and deep-fake compositing using Gemini Veo and Pro models.",
+  "requestFramePermissions": []
+}

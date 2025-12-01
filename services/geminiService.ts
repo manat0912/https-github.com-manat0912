@@ -1,4 +1,6 @@
+
 import { GoogleGenAI, FunctionDeclaration, Type, SchemaType } from "@google/genai";
+import { VFXModule, MaskPoint } from '../types';
 
 const getClient = () => {
   // Always create a new client to pick up the latest selected key if changed via window.aistudio
@@ -60,7 +62,9 @@ const toolsDeclaration: FunctionDeclaration[] = [
             'TOPAZ_VIDEO_AI', // Upscaling/Denoising
             'BLENDER_CYCLES', // 3D Rendering
             'ADOBE_SENSEI', // General Auto-Edit
-            'NOTEBOOK_LM' // Research/Scripting
+            'NOTEBOOK_LM', // Research/Scripting
+            'RELIGHT_AI',
+            'ROTOBOT_AI'
           ]
         }
       },
@@ -78,7 +82,7 @@ export const processVFXCommand = async (userPrompt: string): Promise<VFXCommand>
       contents: userPrompt,
       config: {
         tools: [{ functionDeclarations: toolsDeclaration }],
-        systemInstruction: "You are MunzGen AI Copilot. Map user requests to the most advanced AI engine available. For example, 'remove background' -> DAVINCI_MAGIC_MASK. 'Upscale' -> TOPAZ_VIDEO_AI. 'Create character' -> NANO_BANANA_PRO or VEO_2. 'Physics simulation' -> BLENDER_CYCLES.",
+        systemInstruction: "You are MunzGen AI Copilot. Map user requests to the most advanced AI engine available. For example, 'remove background' -> DAVINCI_MAGIC_MASK. 'Upscale' -> TOPAZ_VIDEO_AI. 'Create character' -> NANO_BANANA_PRO or VEO_2. 'Physics simulation' -> BLENDER_CYCLES. 'Relight scene' -> RELIGHT_AI. 'Auto rotoscope' -> ROTOBOT_AI.",
       },
     });
 
@@ -132,6 +136,7 @@ export const generateVideo = async (
   if (engine === 'DAVINCI_MAGIC_MASK') finalPrompt += " (Use perfect rotoscoping, clean matte extraction, high contrast separation).";
   if (engine === 'TOPAZ_VIDEO_AI') finalPrompt += " (4k resolution, ultra-sharp, noise reduction, artifact removal, 60fps smoothness).";
   if (engine === 'BLENDER_CYCLES') finalPrompt += " (3D Raytraced render, physically based materials, global illumination).";
+  if (engine === 'RELIGHT_AI') finalPrompt += " (Physically correct lighting, raytraced shadows, HDR lighting map integration).";
   
   try {
     let operation;
@@ -212,20 +217,75 @@ export const generateCharacterAnimation = async (
 
 /**
  * Specialized generation for Scene Reconstruction and Enhancement
+ * Now supports Pro AI Modules and Interactive Masking
  */
 export const enhanceScene = async (
   basePrompt: string,
-  options: { upscale: boolean; denoise: boolean; colorGrade: string; reconstruction: string; textures: string },
+  options: { 
+      upscale: boolean; 
+      denoise: boolean; 
+      colorGrade: string; 
+      reconstruction: string; 
+      textures: string;
+      module?: VFXModule;
+      moduleParams?: any;
+      maskPoints?: MaskPoint[];
+  },
   referenceImageBase64?: string
 ): Promise<string> => {
 
   let fullPrompt = `Professional VFX Edit. ${basePrompt}.`;
 
+  // Standard Scene Architect Options
   if (options.upscale) fullPrompt += " Ultra-high resolution 4K style, sharp details (Topaz Video AI Quality).";
   if (options.denoise) fullPrompt += " Clean, noise-free, restoration quality (DeNoise AI).";
   if (options.colorGrade) fullPrompt += ` Professional color grading: ${options.colorGrade} (DaVinci Resolve Color).`;
   if (options.reconstruction) fullPrompt += ` Reconstructed details: ${options.reconstruction} (Adobe Sensei Fill).`;
   if (options.textures) fullPrompt += ` Material change: ${options.textures}.`;
+
+  // Interactive Masking Logic
+  if (options.maskPoints && options.maskPoints.length > 0) {
+      const includes = options.maskPoints.filter(p => p.type === 'include').map(p => `[x:${p.x.toFixed(2)}, y:${p.y.toFixed(2)}]`);
+      const excludes = options.maskPoints.filter(p => p.type === 'exclude').map(p => `[x:${p.x.toFixed(2)}, y:${p.y.toFixed(2)}]`);
+      
+      fullPrompt += " ATTENTION GUIDANCE: ";
+      if (includes.length > 0) fullPrompt += `Focus/Include areas at coordinates: ${includes.join(', ')}. `;
+      if (excludes.length > 0) fullPrompt += `Exclude/Ignore areas at coordinates: ${excludes.join(', ')}. `;
+      fullPrompt += "Use these coordinates for precise spatial masking and alpha matte generation. ";
+  }
+
+  // Professional AI Modules Logic
+  if (options.module) {
+      switch(options.module) {
+          case VFXModule.GEN_FILL:
+              fullPrompt += ` Adobe Firefly style generative fill. Intelligent object removal and replacement: ${basePrompt}. Seamless inpainting.`;
+              break;
+          case VFXModule.MAGIC_MASK:
+              fullPrompt += ` DaVinci Resolve Magic Mask style. Precise rotoscoping and alpha matte generation for: ${basePrompt}. Real-time tracking precision. Automated object isolation.`;
+              break;
+          case VFXModule.RELIGHT:
+              fullPrompt += ` Relight.AI style. Re-light scene. Lighting source: ${options.moduleParams?.lightSource || 'cinematic'}. Recalculate shadows and reflections. Global illumination.`;
+              break;
+          case VFXModule.ROTOBOT:
+              fullPrompt += ` Rotobot style. Automated rotoscoping and background removal. Clean edge refinement. Multi-layer masking consistency.`;
+              break;
+          case VFXModule.SKY_REPLACE:
+              fullPrompt += ` Luminar Neo Sky AI style. Replace sky with: ${basePrompt}. Match atmospheric lighting, fog, and reflections on ground objects.`;
+              break;
+          case VFXModule.DENOISE:
+              fullPrompt += ` Topaz DeNoise AI style. Remove noise while preserving detail. Advanced grain reduction.`;
+              break;
+          case VFXModule.SHARPEN:
+              fullPrompt += ` Topaz Sharpen AI style. Motion blur reduction and focus enhancement. Detail recovery.`;
+              break;
+          case VFXModule.NEURAL_FILTER:
+              fullPrompt += ` Photoshop Neural Filters style. Advanced manipulation: ${basePrompt}. Smart portrait/scene adjustment.`;
+              break;
+          case VFXModule.DEPTH_MAP:
+              fullPrompt += ` Depth-AI style. Generate depth map visualization. 3D scene understanding. Parallax effect readiness.`;
+              break;
+      }
+  }
 
   // Important: Pass the reference image if available to ensure we edit the actual scene
   return await generateVideo(fullPrompt, referenceImageBase64);

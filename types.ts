@@ -1,3 +1,4 @@
+
 export enum ViewMode {
   EDITOR = 'EDITOR',
   SCRIPT = 'SCRIPT',
@@ -16,6 +17,25 @@ export enum ToolType {
   BRIDGE = 'BRIDGE', // New: External Software Integration
   TEMPLATES = 'TEMPLATES', // New: Project Templates
   SETTINGS = 'SETTINGS', // New: Model Manager & Downloads
+}
+
+export enum VFXModule {
+  GEN_FILL = 'GEN_FILL', // Adobe Firefly
+  MAGIC_MASK = 'MAGIC_MASK', // DaVinci Resolve
+  RELIGHT = 'RELIGHT', // Relight.AI
+  ROTOBOT = 'ROTOBOT', // Rotoscoping
+  SKY_REPLACE = 'SKY_REPLACE', // Luminar Neo
+  DENOISE = 'DENOISE', // Topaz DeNoise
+  SHARPEN = 'SHARPEN', // Topaz Sharpen
+  NEURAL_FILTER = 'NEURAL_FILTER', // Photoshop Neural Filters
+  DEPTH_MAP = 'DEPTH_MAP' // Depth-AI
+}
+
+export interface MaskPoint {
+  id: string;
+  x: number; // 0-1 normalized coordinate
+  y: number; // 0-1 normalized coordinate
+  type: 'include' | 'exclude';
 }
 
 export interface Clip {

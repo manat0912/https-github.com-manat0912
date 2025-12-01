@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect } from 'react';
-import { ViewMode, ToolType, Track, Clip } from './types';
+import { ViewMode, ToolType, Track, Clip, MaskPoint } from './types';
 import Timeline from './components/Timeline';
 import ControlPanel from './components/ControlPanel';
 import Viewport from './components/Viewport';
@@ -28,6 +29,10 @@ const App: React.FC = () => {
     control: false,
     script: false
   });
+
+  // Masking State (Pro AI Suite)
+  const [maskingMode, setMaskingMode] = useState<'include' | 'exclude' | null>(null);
+  const [maskPoints, setMaskPoints] = useState<MaskPoint[]>([]);
 
   // Generated result to show in viewport
   const [lastGenerated, setLastGenerated] = useState<{ url: string; type: 'video' | 'image' } | null>(null);
@@ -199,6 +204,17 @@ const App: React.FC = () => {
     setMinimized(prev => ({ ...prev, [panel]: !prev[panel] }));
   };
 
+  const handleMaskClick = (x: number, y: number) => {
+    if (!maskingMode) return;
+    const newPoint: MaskPoint = {
+      id: Date.now().toString(),
+      x,
+      y,
+      type: maskingMode
+    };
+    setMaskPoints([...maskPoints, newPoint]);
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-100 font-sans overflow-hidden">
       
@@ -309,6 +325,9 @@ const App: React.FC = () => {
                     generatedAsset={lastGenerated}
                     currentClip={tracks[2].clips.find(c => currentTime >= c.start && currentTime < c.start + c.duration)}
                     inputVideoUrl={inputVideoUrl}
+                    maskingMode={maskingMode}
+                    maskPoints={maskPoints}
+                    onMaskClick={handleMaskClick}
                   />
                   
                   {/* Control Panel Resize Handle */}
@@ -353,6 +372,10 @@ const App: React.FC = () => {
                             onClearTrack={handleClearTrack}
                             inputVideoClip={inputVideoClip}
                             inputAudioClip={inputAudioClip}
+                            maskingMode={maskingMode}
+                            setMaskingMode={setMaskingMode}
+                            maskPoints={maskPoints}
+                            onClearMasks={() => setMaskPoints([])}
                         />
                      )}
                   </div>

@@ -1,11 +1,13 @@
+
 import React, { useState, useRef } from 'react';
-import { ToolType, Track, Clip } from '../types';
+import { ToolType, Track, Clip, VFXModule, MaskPoint } from '../types';
 import { 
   Wand2, Scissors, UserSquare2, MountainSnow, Crosshair, 
   Video, PlayCircle, Loader2, AlertCircle, ImagePlus,
   Move3d, Layers, Bone, Wind, ScanLine, FileUp, UploadCloud,
   Package, Link as LinkIcon, Settings as SettingsIcon,
-  ChevronUp, ChevronDown, Grid, LayoutTemplate, Sparkles, X, Music, Bot, Zap, Cpu
+  ChevronUp, ChevronDown, Grid, LayoutTemplate, Sparkles, X, Music, Bot, Zap, Cpu,
+  Eraser, Sun, Scan, Focus, Cloud, Camera, Plus, Minus, Trash2, MousePointer2
 } from 'lucide-react';
 import { 
   generateVideo, 
@@ -30,11 +32,17 @@ interface ControlPanelProps {
   onClearTrack: (trackId: string) => void;
   inputVideoClip?: Clip;
   inputAudioClip?: Clip;
+  // Masking Props
+  maskingMode: 'include' | 'exclude' | null;
+  setMaskingMode: (mode: 'include' | 'exclude' | null) => void;
+  maskPoints: MaskPoint[];
+  onClearMasks: () => void;
 }
 
 const ControlPanelReal: React.FC<ControlPanelProps> = ({ 
     activeTool, setActiveTool, onAssetGenerated, onLoadTemplate, onImportClip, onClearTrack,
-    inputVideoClip, inputAudioClip 
+    inputVideoClip, inputAudioClip,
+    maskingMode, setMaskingMode, maskPoints, onClearMasks
 }) => {
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -54,7 +62,11 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
   const [motionPrompt, setMotionPrompt] = useState('');
   const [mocapFileName, setMocapFileName] = useState<string | null>(null);
 
-  // Scene Architect State
+  // Scene Architect (Pro Suite) State
+  const [activeModule, setActiveModule] = useState<VFXModule | null>(null);
+  const [moduleParams, setModuleParams] = useState<any>({});
+  
+  // Legacy Scene Architect State (kept for fallback)
   const [upscale, setUpscale] = useState(false);
   const [denoise, setDenoise] = useState(false);
   const [colorGrade, setColorGrade] = useState('');
@@ -71,11 +83,22 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
     { id: ToolType.CHARACTER_CREATOR, icon: UserSquare2, label: 'Character' },
     { id: ToolType.OBJECT_TRACK, icon: Video, label: 'Track' },
     { id: ToolType.ANIMATION_STUDIO, icon: Move3d, label: 'Anim Studio' },
-    { id: ToolType.SCENE_ARCHITECT, icon: Layers, label: 'Architect' },
+    { id: ToolType.SCENE_ARCHITECT, icon: Layers, label: 'Pro AI Suite' },
     { id: ToolType.MATERIAL_LIBRARY, icon: Package, label: 'Materials' },
     { id: ToolType.BRIDGE, icon: LinkIcon, label: 'Bridge' },
     { id: ToolType.TEMPLATES, icon: LayoutTemplate, label: 'Templates' },
     { id: ToolType.SETTINGS, icon: SettingsIcon, label: 'Settings' },
+  ];
+
+  const proModules = [
+    { id: VFXModule.GEN_FILL, icon: Eraser, label: 'Gen Fill', color: 'text-blue-400' },
+    { id: VFXModule.MAGIC_MASK, icon: Scan, label: 'Magic Mask', color: 'text-purple-400' },
+    { id: VFXModule.ROTOBOT, icon: Bot, label: 'Rotobot', color: 'text-green-400' },
+    { id: VFXModule.RELIGHT, icon: Sun, label: 'Relight', color: 'text-yellow-400' },
+    { id: VFXModule.SKY_REPLACE, icon: Cloud, label: 'Sky AI', color: 'text-cyan-400' },
+    { id: VFXModule.DENOISE, icon: Wand2, label: 'DeNoise', color: 'text-indigo-400' },
+    { id: VFXModule.SHARPEN, icon: Focus, label: 'Sharpen', color: 'text-pink-400' },
+    { id: VFXModule.DEPTH_MAP, icon: Layers, label: 'Depth AI', color: 'text-emerald-400' },
   ];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -201,7 +224,7 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
     let toolAction = 'GENERATE';
     let detectedEngine = 'VEO_2'; // Default
     
-    if (autoVFX && prompt) {
+    if (autoVFX && prompt && activeTool !== ToolType.SCENE_ARCHITECT) {
        setStatusMsg("Copilot Analyzing Request...");
        const command = await processVFXCommand(prompt);
        
@@ -218,13 +241,18 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
        }
     }
 
+    // If we are in SCENE_ARCHITECT (Pro Suite), mapped engine is specific to module
+    if (activeTool === ToolType.SCENE_ARCHITECT && activeModule) {
+        detectedEngine = activeModule.replace('_', ' '); // E.g., "MAGIC MASK"
+    }
+
     setActiveEngine(detectedEngine);
 
     // Basic validation
     if (activeTool === ToolType.ANIMATION_STUDIO) {
         if (!characterPrompt || !motionPrompt) return;
     } else if (activeTool === ToolType.SCENE_ARCHITECT) {
-        if (!prompt && !texturePrompt) return;
+        // Validation handled by module params check implicitly
     } else {
         if (!prompt) return;
     }
@@ -243,22 +271,27 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
             base64Ref = refImage.split(',')[1];
         } else if (base64Input) {
             base64Ref = base64Input;
-            setStatusMsg(`Applying ${detectedEngine.replace(/_/g, ' ')} to Input...`);
+            setStatusMsg(`Processing Input with ${detectedEngine.replace(/_/g, ' ')}...`);
         }
 
         if (activeTool === ToolType.ANIMATION_STUDIO) {
-            // Animation Studio likely triggers Blender/Veo engines
             const url = await generateCharacterAnimation(characterPrompt + autoVFXSuffix, motionPrompt, {
               autoRig, usePhysics, useMocap
             });
             onAssetGenerated(url, 'video', `Anim: ${characterPrompt} - ${motionPrompt}`);
         } 
         else if (activeTool === ToolType.SCENE_ARCHITECT) {
-            // Scene Architect triggers Topaz/DaVinci
+            // New Pro AI Suite Logic with Interactive Masking
             const url = await enhanceScene(prompt + autoVFXSuffix, {
-              upscale, denoise, colorGrade, reconstruction: prompt, textures: texturePrompt
+              upscale, denoise, colorGrade, reconstruction: prompt, textures: texturePrompt,
+              module: activeModule || undefined,
+              moduleParams,
+              maskPoints // Pass the interactive selection points
             }, base64Ref);
-            onAssetGenerated(url, 'video', `Architect: ${prompt}`);
+            
+            let label = `Architect: ${prompt}`;
+            if (activeModule) label = `${activeModule}: ${prompt}`;
+            onAssetGenerated(url, 'video', label);
         }
         else if (activeTool === ToolType.CHARACTER_CREATOR && !refImage && !base64Ref) {
             // Concept Art Mode - Nano Banana Pro
@@ -290,6 +323,11 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
     activeTool === ToolType.CHARACTER_CREATOR || 
     activeTool === ToolType.SCENE_ARCHITECT ||
     activeTool === ToolType.ANIMATION_STUDIO;
+  
+  // Is Masking Relevant?
+  const isMaskingRelevant = 
+    activeTool === ToolType.SCENE_ARCHITECT && 
+    (activeModule === VFXModule.MAGIC_MASK || activeModule === VFXModule.ROTOBOT || activeModule === VFXModule.GEN_FILL);
 
   return (
     <div className="w-full h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shrink-0 relative">
@@ -344,7 +382,7 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
             {activeTool === ToolType.BRIDGE && <LinkIcon className="text-emerald-400" size={18}/>}
             {activeTool === ToolType.TEMPLATES && <LayoutTemplate className="text-cyan-400" size={18}/>}
             {activeTool === ToolType.SETTINGS && <SettingsIcon className="text-zinc-400" size={18}/>}
-            <span className="capitalize truncate">{activeTool.replace('_', ' ').toLowerCase()} Properties</span>
+            <span className="capitalize truncate">{activeTool === ToolType.SCENE_ARCHITECT ? "Pro AI Suite" : activeTool.replace('_', ' ').toLowerCase()} Properties</span>
         </h3>
 
         {activeTool === ToolType.MATERIAL_LIBRARY ? (
@@ -508,55 +546,128 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
                     </>
                 )}
 
-                {/* SCENE ARCHITECT CONTROLS */}
+                {/* PRO AI SUITE (SCENE ARCHITECT REFACTORED) */}
                 {activeTool === ToolType.SCENE_ARCHITECT && (
                     <>
-                        <div className="grid grid-cols-2 gap-2 mb-2">
-                             <button 
-                                onClick={() => setUpscale(!upscale)}
-                                className={`p-2 rounded border flex items-center justify-center gap-2 text-xs font-bold transition-all ${upscale ? 'bg-blue-900/50 border-blue-500 text-blue-300' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}
-                            >
-                               <UploadCloud size={14} /> 4K Upscale
-                            </button>
-                             <button 
-                                onClick={() => setDenoise(!denoise)}
-                                className={`p-2 rounded border flex items-center justify-center gap-2 text-xs font-bold transition-all ${denoise ? 'bg-blue-900/50 border-blue-500 text-blue-300' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}
-                            >
-                                <Wand2 size={14} /> AI Denoise
-                            </button>
+                        <label className="text-xs text-zinc-400 uppercase font-bold tracking-wider mb-2 block">AI Modules</label>
+                        <div className="grid grid-cols-4 gap-2 mb-4">
+                            {proModules.map((mod) => (
+                                <button
+                                    key={mod.id}
+                                    onClick={() => { setActiveModule(mod.id); setMaskingMode(null); }}
+                                    className={`flex flex-col items-center justify-center p-2 rounded border transition-all ${
+                                        activeModule === mod.id 
+                                        ? 'bg-zinc-800 border-cyan-500 shadow-md shadow-cyan-900/20' 
+                                        : 'bg-zinc-950 border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700'
+                                    }`}
+                                >
+                                    <mod.icon size={16} className={`mb-1 ${mod.color}`} />
+                                    <span className="text-[8px] font-bold text-zinc-400 uppercase text-center">{mod.label}</span>
+                                </button>
+                            ))}
                         </div>
 
-                        <div className="space-y-2">
-                             <label className="text-xs text-zinc-400 uppercase font-bold tracking-wider">Reconstruction / Fix</label>
-                             <textarea 
-                                value={prompt}
-                                onChange={(e) => setPrompt(e.target.value)}
-                                className="w-full h-16 bg-zinc-950 border border-zinc-700 rounded p-2 text-sm text-zinc-200 resize-none focus:border-blue-500 focus:outline-none"
-                                placeholder="E.g., Reconstruct damaged building wall, fill missing sky..."
-                             />
-                        </div>
-                        
-                        <div className="space-y-2">
-                             <label className="text-xs text-zinc-400 uppercase font-bold tracking-wider">Object/Texture Remix</label>
-                             <input 
-                                type="text"
-                                value={texturePrompt}
-                                onChange={(e) => setTexturePrompt(e.target.value)}
-                                className="w-full bg-zinc-950 border border-zinc-700 rounded p-2 text-sm text-zinc-200 focus:border-blue-500 focus:outline-none"
-                                placeholder="E.g., Change terrain to magma..."
-                             />
-                        </div>
+                        {/* Module Specific Inputs */}
+                        {activeModule && (
+                            <div className="p-3 bg-zinc-950 rounded border border-zinc-800 mb-2 animate-in fade-in slide-in-from-top-2">
+                                <div className="flex items-center gap-2 mb-3 border-b border-zinc-800 pb-2">
+                                     <Sparkles size={12} className="text-cyan-400" />
+                                     <span className="text-xs font-bold text-white uppercase">{activeModule.replace('_', ' ')} Settings</span>
+                                </div>
 
-                        <div className="space-y-2">
-                             <label className="text-xs text-zinc-400 uppercase font-bold tracking-wider">Color Grading</label>
-                             <input 
-                                type="text"
-                                value={colorGrade}
-                                onChange={(e) => setColorGrade(e.target.value)}
-                                className="w-full bg-zinc-950 border border-zinc-700 rounded p-2 text-sm text-zinc-200 focus:border-blue-500 focus:outline-none"
-                                placeholder="E.g., Cyberpunk teal and orange..."
-                             />
-                        </div>
+                                {/* INTERACTIVE MASKING CONTROLS */}
+                                {isMaskingRelevant && (
+                                   <div className="mb-4 space-y-2">
+                                      <label className="text-[10px] text-zinc-500 uppercase font-bold flex items-center justify-between">
+                                          Interactive Selection
+                                          {maskPoints.length > 0 && (
+                                              <span className="text-cyan-400 text-[9px]">{maskPoints.length} Points Selected</span>
+                                          )}
+                                      </label>
+                                      
+                                      <div className="grid grid-cols-3 gap-2">
+                                          <button 
+                                            onClick={() => setMaskingMode(maskingMode === 'include' ? null : 'include')}
+                                            className={`p-2 rounded border flex flex-col items-center justify-center gap-1 transition-all ${
+                                                maskingMode === 'include' 
+                                                ? 'bg-green-900/30 border-green-500 text-green-400' 
+                                                : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+                                            }`}
+                                          >
+                                              <Plus size={14} />
+                                              <span className="text-[9px] font-bold">Select (+)</span>
+                                          </button>
+                                          
+                                          <button 
+                                            onClick={() => setMaskingMode(maskingMode === 'exclude' ? null : 'exclude')}
+                                            className={`p-2 rounded border flex flex-col items-center justify-center gap-1 transition-all ${
+                                                maskingMode === 'exclude' 
+                                                ? 'bg-red-900/30 border-red-500 text-red-400' 
+                                                : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800'
+                                            }`}
+                                          >
+                                              <Minus size={14} />
+                                              <span className="text-[9px] font-bold">Exclude (-)</span>
+                                          </button>
+
+                                          <button 
+                                            onClick={onClearMasks}
+                                            disabled={maskPoints.length === 0}
+                                            className="p-2 rounded border bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-red-400 disabled:opacity-50 disabled:hover:text-zinc-400 flex flex-col items-center justify-center gap-1"
+                                          >
+                                              <Trash2 size={14} />
+                                              <span className="text-[9px] font-bold">Clear</span>
+                                          </button>
+                                      </div>
+                                      
+                                      <p className="text-[9px] text-zinc-500 italic">
+                                          {maskingMode ? "Click on the preview video to set points." : "Select a mode to start masking."}
+                                      </p>
+                                   </div>
+                                )}
+
+                                {(activeModule === VFXModule.GEN_FILL || activeModule === VFXModule.MAGIC_MASK || activeModule === VFXModule.SKY_REPLACE) && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-zinc-500 uppercase font-bold">Target Description</label>
+                                        <input 
+                                            type="text" 
+                                            value={prompt} 
+                                            onChange={(e) => setPrompt(e.target.value)}
+                                            placeholder={activeModule === VFXModule.SKY_REPLACE ? "E.g. Sunset, Stormy Clouds" : "E.g. The car in the foreground"}
+                                            className="w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                                        />
+                                    </div>
+                                )}
+
+                                {activeModule === VFXModule.RELIGHT && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-zinc-500 uppercase font-bold">Light Source</label>
+                                        <select 
+                                            className="w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-xs text-white focus:outline-none"
+                                            onChange={(e) => setModuleParams({...moduleParams, lightSource: e.target.value})}
+                                        >
+                                            <option value="cinematic">Cinematic Soft</option>
+                                            <option value="sunlight">Direct Sunlight</option>
+                                            <option value="neon">Neon Cyberpunk</option>
+                                            <option value="moonlight">Moonlight</option>
+                                        </select>
+                                    </div>
+                                )}
+
+                                {(activeModule === VFXModule.DENOISE || activeModule === VFXModule.SHARPEN) && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-zinc-500 uppercase font-bold">Strength</label>
+                                        <input type="range" className="w-full accent-cyan-500 h-1 bg-zinc-800 rounded appearance-none" />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {!activeModule && (
+                             <div className="p-4 text-center text-zinc-500 text-xs italic border border-dashed border-zinc-800 rounded">
+                                Select a module to begin professional enhancement.
+                             </div>
+                        )}
                     </>
                 )}
 
@@ -617,7 +728,7 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
                 <button
                     disabled={isGenerating || (
                         (activeTool === ToolType.ANIMATION_STUDIO && (!characterPrompt || !motionPrompt)) ||
-                        (activeTool === ToolType.SCENE_ARCHITECT && !prompt && !texturePrompt) ||
+                        (activeTool === ToolType.SCENE_ARCHITECT && !activeModule && !prompt && !texturePrompt) ||
                         (isGenericTool && !prompt)
                     )}
                     onClick={handleGenerate}

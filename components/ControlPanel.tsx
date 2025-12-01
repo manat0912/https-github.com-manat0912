@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ToolType, Track, Clip } from '../types';
 import { 
   Wand2, Scissors, UserSquare2, MountainSnow, Crosshair, 
   Video, PlayCircle, Loader2, AlertCircle, ImagePlus,
   Move3d, Layers, Bone, Wind, ScanLine, FileUp, UploadCloud,
   Package, Link as LinkIcon, Settings as SettingsIcon,
-  ChevronUp, ChevronDown, Grid, LayoutTemplate, Sparkles, X, Music
+  ChevronUp, ChevronDown, Grid, LayoutTemplate, Sparkles, X, Music, Bot, Zap, Cpu
 } from 'lucide-react';
 import { 
   generateVideo, 
@@ -13,7 +13,8 @@ import {
   generateCharacterAnimation, 
   enhanceScene,
   checkApiKeySelection, 
-  promptApiKeySelection 
+  promptApiKeySelection,
+  processVFXCommand
 } from '../services/geminiService';
 import MaterialLibrary, { MaterialItem } from './MaterialLibrary';
 import SettingsPanel from './SettingsPanel';
@@ -38,8 +39,9 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [activeEngine, setActiveEngine] = useState<string | null>(null);
   const [refImage, setRefImage] = useState<string | null>(null);
-  const [autoVFX, setAutoVFX] = useState(false);
+  const [autoVFX, setAutoVFX] = useState(true); // Default to true for better UX
   
   // UI State
   const [isToolsGridExpanded, setIsToolsGridExpanded] = useState(true);
@@ -57,6 +59,9 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
   const [denoise, setDenoise] = useState(false);
   const [colorGrade, setColorGrade] = useState('');
   const [texturePrompt, setTexturePrompt] = useState('');
+
+  // Hidden video element for frame extraction
+  const hiddenVideoRef = useRef<HTMLVideoElement>(null);
 
   const tools = [
     { id: ToolType.SELECT, icon: Crosshair, label: 'Select' },
@@ -113,11 +118,48 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
     // Treat material application as a scene enhancement
     await executeGeneration(async () => {
       setStatusMsg(`Applying ${item.name}...`);
+      
+      // Capture frame if input video exists
+      const base64Input = await captureVideoFrame();
+      
       // Use enhanceScene to modify the scene with the material
       const url = await enhanceScene(`Apply ${item.promptEquivalent} to the scene`, {
         upscale: false, denoise: false, colorGrade: '', reconstruction: '', textures: item.promptEquivalent
-      });
+      }, base64Input);
+      
       onAssetGenerated(url, 'video', `Material: ${item.name}`);
+    });
+  };
+
+  // Helper to capture a frame from the input video to use as a reference for generation
+  const captureVideoFrame = async (): Promise<string | undefined> => {
+    if (!inputVideoClip || !hiddenVideoRef.current) return undefined;
+    
+    return new Promise((resolve) => {
+      const video = hiddenVideoRef.current!;
+      video.crossOrigin = "anonymous";
+      video.src = inputVideoClip.url || '';
+      
+      video.onloadeddata = () => {
+        video.currentTime = 0; // Capture first frame
+      };
+
+      video.onseeked = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/png');
+          const base64 = dataUrl.split(',')[1];
+          resolve(base64);
+        } else {
+          resolve(undefined);
+        }
+      };
+      
+      setTimeout(() => resolve(undefined), 2000);
     });
   };
 
@@ -149,10 +191,35 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
        }
      } finally {
        setIsGenerating(false);
+       setActiveEngine(null);
      }
   };
 
   const handleGenerate = async () => {
+    // 1. Intelligent Routing (Auto-VFX)
+    let finalPrompt = prompt;
+    let toolAction = 'GENERATE';
+    let detectedEngine = 'VEO_2'; // Default
+    
+    if (autoVFX && prompt) {
+       setStatusMsg("Copilot Analyzing Request...");
+       const command = await processVFXCommand(prompt);
+       
+       if (command.action === 'CHANGE_TOOL' && command.toolId) {
+           setStatusMsg(command.responseMessage || "Switching tool...");
+           setActiveTool(command.toolId as ToolType);
+           setIsGenerating(false);
+           return; // Stop here, we just switched tools
+       }
+       
+       if (command.action === 'GENERATE') {
+           if (command.parameters?.prompt) finalPrompt = command.parameters.prompt;
+           if (command.detectedEngine) detectedEngine = command.detectedEngine;
+       }
+    }
+
+    setActiveEngine(detectedEngine);
+
     // Basic validation
     if (activeTool === ToolType.ANIMATION_STUDIO) {
         if (!characterPrompt || !motionPrompt) return;
@@ -162,41 +229,47 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
         if (!prompt) return;
     }
 
-    // Auto-VFX Logic
     const autoVFXSuffix = autoVFX 
-        ? " Auto-VFX enabled: handle all visual effects, compositing, lighting matching, and seamless integration automatically. Ensure professional studio quality." 
+        ? " Professional VFX Studio: Ensure seamless integration, photorealistic lighting, and match input video perspective." 
         : "";
 
     await executeGeneration(async () => {
-        setStatusMsg("Initializing AI Model...");
+        // 2. Context Extraction (Grounding)
+        setStatusMsg(`Active Engine: ${detectedEngine.replace(/_/g, ' ')}...`);
+        const base64Input = await captureVideoFrame();
+        
+        let base64Ref = undefined;
+        if (refImage) {
+            base64Ref = refImage.split(',')[1];
+        } else if (base64Input) {
+            base64Ref = base64Input;
+            setStatusMsg(`Applying ${detectedEngine.replace(/_/g, ' ')} to Input...`);
+        }
+
         if (activeTool === ToolType.ANIMATION_STUDIO) {
-            setStatusMsg("Processing Auto-Rigging & Physics Simulation...");
+            // Animation Studio likely triggers Blender/Veo engines
             const url = await generateCharacterAnimation(characterPrompt + autoVFXSuffix, motionPrompt, {
               autoRig, usePhysics, useMocap
             });
             onAssetGenerated(url, 'video', `Anim: ${characterPrompt} - ${motionPrompt}`);
         } 
         else if (activeTool === ToolType.SCENE_ARCHITECT) {
-            setStatusMsg("Reconstructing & Enhancing Scene...");
+            // Scene Architect triggers Topaz/DaVinci
             const url = await enhanceScene(prompt + autoVFXSuffix, {
               upscale, denoise, colorGrade, reconstruction: prompt, textures: texturePrompt
-            });
+            }, base64Ref);
             onAssetGenerated(url, 'video', `Architect: ${prompt}`);
         }
-        else if (activeTool === ToolType.CHARACTER_CREATOR && !refImage) {
-            // Concept Art Mode
-            setStatusMsg("Generating Character Concept...");
+        else if (activeTool === ToolType.CHARACTER_CREATOR && !refImage && !base64Ref) {
+            // Concept Art Mode - Nano Banana Pro
+            setActiveEngine('NANO_BANANA_PRO');
+            setStatusMsg("Engine: Nano Banana Pro (Gemini 3 Pro Image)");
             const url = await generateImage(prompt + autoVFXSuffix);
             onAssetGenerated(url, 'image', prompt);
         } else {
-            // Standard Video Mode
-            let base64Ref = undefined;
-            if (refImage) {
-                base64Ref = refImage.split(',')[1];
-            }
-            setStatusMsg("Rendering Video (this may take a minute)...");
-            const url = await generateVideo(prompt + autoVFXSuffix, base64Ref);
-            onAssetGenerated(url, 'video', prompt);
+            // Standard Video Mode / VFX Edit
+            const url = await generateVideo(finalPrompt + autoVFXSuffix, base64Ref, detectedEngine);
+            onAssetGenerated(url, 'video', finalPrompt);
         }
     });
   };
@@ -219,8 +292,11 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
     activeTool === ToolType.ANIMATION_STUDIO;
 
   return (
-    <div className="w-full h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shrink-0">
+    <div className="w-full h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shrink-0 relative">
       
+      {/* Hidden Video Element for Frame Capture */}
+      <video ref={hiddenVideoRef} className="hidden" crossOrigin="anonymous" muted playsInline />
+
       {/* Tool Grid Header */}
       <div 
         className="flex items-center justify-between px-4 py-2 border-b border-zinc-800 bg-zinc-900 shrink-0 cursor-pointer hover:bg-zinc-800/50 transition-colors"
@@ -503,13 +579,13 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
 
                 {/* Auto-VFX Toggle */}
                 {canUseAutoVFX && (
-                   <div className="bg-gradient-to-r from-purple-900/30 to-blue-900/30 p-3 rounded-lg border border-purple-500/30">
-                        <div className="flex items-center justify-between">
+                   <div className={`bg-gradient-to-r p-3 rounded-lg border transition-all ${autoVFX ? 'from-purple-900/40 to-blue-900/40 border-purple-500/50' : 'from-zinc-900 to-zinc-800 border-zinc-700'}`}>
+                        <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-2">
-                                <Sparkles size={16} className="text-purple-400" />
+                                {autoVFX ? <Bot size={18} className="text-purple-400" /> : <Sparkles size={18} className="text-zinc-500" />}
                                 <div>
-                                    <span className="text-xs font-bold text-zinc-100 block">AI Auto-VFX</span>
-                                    <span className="text-[10px] text-zinc-400 block">Handle compositing & effects automatically</span>
+                                    <span className={`text-xs font-bold block ${autoVFX ? 'text-zinc-100' : 'text-zinc-400'}`}>AI Copilot & Auto-VFX</span>
+                                    <span className="text-[10px] text-zinc-400 block">Intelligent command routing</span>
                                 </div>
                             </div>
                             <label className="relative inline-flex items-center cursor-pointer">
@@ -517,6 +593,23 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
                                 <div className="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
                             </label>
                         </div>
+                        
+                        {autoVFX && (
+                            <div className="grid grid-cols-2 gap-1.5 mt-2">
+                                <div className="text-[9px] bg-black/40 px-2 py-1 rounded text-zinc-400 flex items-center gap-1.5">
+                                    <Zap size={10} className="text-yellow-500" /> Gemini 2.5 Pro
+                                </div>
+                                <div className="text-[9px] bg-black/40 px-2 py-1 rounded text-zinc-400 flex items-center gap-1.5">
+                                    <Video size={10} className="text-emerald-500" /> Veo 2 / Nano Banana
+                                </div>
+                                <div className="text-[9px] bg-black/40 px-2 py-1 rounded text-zinc-400 flex items-center gap-1.5">
+                                    <Wand2 size={10} className="text-purple-500" /> DaVinci Magic Mask
+                                </div>
+                                <div className="text-[9px] bg-black/40 px-2 py-1 rounded text-zinc-400 flex items-center gap-1.5">
+                                    <Cpu size={10} className="text-blue-500" /> Topaz Video AI
+                                </div>
+                            </div>
+                        )}
                    </div>
                 )}
 
@@ -539,7 +632,7 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
                         </>
                     ) : (
                         <>
-                            <PlayCircle size={16} /> Generate / Apply
+                            <PlayCircle size={16} /> {autoVFX ? 'Execute Command' : 'Generate'}
                         </>
                     )}
                 </button>

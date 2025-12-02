@@ -1,13 +1,15 @@
 
+
 import React, { useState, useRef } from 'react';
-import { ToolType, Track, Clip, VFXModule, MaskPoint } from '../types';
+import { ToolType, Track, Clip, VFXModule, MaskPoint, ModelSource } from '../types';
 import { 
   Wand2, Scissors, UserSquare2, MountainSnow, Crosshair, 
   Video, PlayCircle, Loader2, AlertCircle, ImagePlus,
   Move3d, Layers, Bone, Wind, ScanLine, FileUp, UploadCloud,
   Package, Link as LinkIcon, Settings as SettingsIcon,
   ChevronUp, ChevronDown, Grid, LayoutTemplate, Sparkles, X, Music, Bot, Zap, Cpu,
-  Eraser, Sun, Scan, Focus, Cloud, Camera, Plus, Minus, Trash2, MousePointer2
+  Eraser, Sun, Scan, Focus, Cloud, Camera, Plus, Minus, Trash2, MousePointer2,
+  Map, Navigation, Code2, Globe
 } from 'lucide-react';
 import { 
   generateVideo, 
@@ -65,6 +67,7 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
   // Scene Architect (Pro Suite) State
   const [activeModule, setActiveModule] = useState<VFXModule | null>(null);
   const [moduleParams, setModuleParams] = useState<any>({});
+  const [modelSource, setModelSource] = useState<ModelSource>('CLOSED');
   
   // Legacy Scene Architect State (kept for fallback)
   const [upscale, setUpscale] = useState(false);
@@ -90,16 +93,28 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
     { id: ToolType.SETTINGS, icon: SettingsIcon, label: 'Settings' },
   ];
 
-  const proModules = [
+  const closedModules = [
     { id: VFXModule.GEN_FILL, icon: Eraser, label: 'Gen Fill', color: 'text-blue-400' },
     { id: VFXModule.MAGIC_MASK, icon: Scan, label: 'Magic Mask', color: 'text-purple-400' },
     { id: VFXModule.ROTOBOT, icon: Bot, label: 'Rotobot', color: 'text-green-400' },
     { id: VFXModule.RELIGHT, icon: Sun, label: 'Relight', color: 'text-yellow-400' },
     { id: VFXModule.SKY_REPLACE, icon: Cloud, label: 'Sky AI', color: 'text-cyan-400' },
+    { id: VFXModule.TERRAIN_AI, icon: Map, label: 'Terrain AI', color: 'text-amber-500' },
+    { id: VFXModule.AUTO_MAP, icon: Navigation, label: 'Auto Map', color: 'text-indigo-400' },
     { id: VFXModule.DENOISE, icon: Wand2, label: 'DeNoise', color: 'text-indigo-400' },
     { id: VFXModule.SHARPEN, icon: Focus, label: 'Sharpen', color: 'text-pink-400' },
     { id: VFXModule.DEPTH_MAP, icon: Layers, label: 'Depth AI', color: 'text-emerald-400' },
   ];
+
+  const openModules = [
+      { id: VFXModule.SAM3_SEGMENT, icon: Scan, label: 'SAM 3', color: 'text-green-400', desc: 'Segment Anything 3' },
+      { id: VFXModule.WAN_INPAINT, icon: Eraser, label: 'Wan 2.1', color: 'text-blue-400', desc: 'Wan Video Inpainting' },
+      { id: VFXModule.DEPTH_ANYTHING, icon: Layers, label: 'Depth V2', color: 'text-purple-400', desc: 'Depth Anything V2' },
+      { id: VFXModule.FLUX_FILL, icon: Wand2, label: 'Flux Fill', color: 'text-cyan-400', desc: 'Flux Inpainting' },
+  ];
+
+  // Derive visible modules based on source selection
+  const visibleModules = modelSource === 'CLOSED' ? closedModules : openModules;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -147,7 +162,8 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
       
       // Use enhanceScene to modify the scene with the material
       const url = await enhanceScene(`Apply ${item.promptEquivalent} to the scene`, {
-        upscale: false, denoise: false, colorGrade: '', reconstruction: '', textures: item.promptEquivalent
+        upscale: false, denoise: false, colorGrade: '', reconstruction: '', textures: item.promptEquivalent,
+        modelSource
       }, base64Input);
       
       onAssetGenerated(url, 'video', `Material: ${item.name}`);
@@ -286,7 +302,8 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
               upscale, denoise, colorGrade, reconstruction: prompt, textures: texturePrompt,
               module: activeModule || undefined,
               moduleParams,
-              maskPoints // Pass the interactive selection points
+              maskPoints, // Pass the interactive selection points
+              modelSource // Pass the source selection (Open/Closed)
             }, base64Ref);
             
             let label = `Architect: ${prompt}`;
@@ -327,7 +344,15 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
   // Is Masking Relevant?
   const isMaskingRelevant = 
     activeTool === ToolType.SCENE_ARCHITECT && 
-    (activeModule === VFXModule.MAGIC_MASK || activeModule === VFXModule.ROTOBOT || activeModule === VFXModule.GEN_FILL);
+    (
+        activeModule === VFXModule.MAGIC_MASK || 
+        activeModule === VFXModule.ROTOBOT || 
+        activeModule === VFXModule.GEN_FILL || 
+        activeModule === VFXModule.TERRAIN_AI || 
+        activeModule === VFXModule.AUTO_MAP ||
+        activeModule === VFXModule.SAM3_SEGMENT ||
+        activeModule === VFXModule.WAN_INPAINT
+    );
 
   return (
     <div className="w-full h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shrink-0 relative">
@@ -549,9 +574,28 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
                 {/* PRO AI SUITE (SCENE ARCHITECT REFACTORED) */}
                 {activeTool === ToolType.SCENE_ARCHITECT && (
                     <>
-                        <label className="text-xs text-zinc-400 uppercase font-bold tracking-wider mb-2 block">AI Modules</label>
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="text-xs text-zinc-400 uppercase font-bold tracking-wider">AI Modules</label>
+                            
+                            {/* MODEL SOURCE TOGGLE */}
+                            <div className="flex bg-zinc-950 rounded p-0.5 border border-zinc-800">
+                                <button 
+                                    onClick={() => { setModelSource('CLOSED'); setActiveModule(null); }}
+                                    className={`px-2 py-1 text-[9px] font-bold uppercase rounded transition-colors flex items-center gap-1 ${modelSource === 'CLOSED' ? 'bg-zinc-800 text-cyan-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                >
+                                    <Zap size={10} /> Proprietary
+                                </button>
+                                <button 
+                                    onClick={() => { setModelSource('OPEN'); setActiveModule(null); }}
+                                    className={`px-2 py-1 text-[9px] font-bold uppercase rounded transition-colors flex items-center gap-1 ${modelSource === 'OPEN' ? 'bg-zinc-800 text-green-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                >
+                                    <Globe size={10} /> Open Src
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-4 gap-2 mb-4">
-                            {proModules.map((mod) => (
+                            {visibleModules.map((mod) => (
                                 <button
                                     key={mod.id}
                                     onClick={() => { setActiveModule(mod.id); setMaskingMode(null); }}
@@ -573,6 +617,7 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
                                 <div className="flex items-center gap-2 mb-3 border-b border-zinc-800 pb-2">
                                      <Sparkles size={12} className="text-cyan-400" />
                                      <span className="text-xs font-bold text-white uppercase">{activeModule.replace('_', ' ')} Settings</span>
+                                     {modelSource === 'OPEN' && <span className="text-[9px] bg-green-900/30 text-green-400 px-1 rounded border border-green-800 ml-auto">HF/Open</span>}
                                 </div>
 
                                 {/* INTERACTIVE MASKING CONTROLS */}
@@ -626,16 +671,66 @@ const ControlPanelReal: React.FC<ControlPanelProps> = ({
                                    </div>
                                 )}
 
-                                {(activeModule === VFXModule.GEN_FILL || activeModule === VFXModule.MAGIC_MASK || activeModule === VFXModule.SKY_REPLACE) && (
+                                {(activeModule === VFXModule.GEN_FILL || activeModule === VFXModule.MAGIC_MASK || activeModule === VFXModule.SKY_REPLACE || activeModule === VFXModule.TERRAIN_AI || activeModule === VFXModule.AUTO_MAP || activeModule === VFXModule.WAN_INPAINT || activeModule === VFXModule.SAM3_SEGMENT || activeModule === VFXModule.FLUX_FILL) && (
                                     <div className="space-y-2">
                                         <label className="text-[10px] text-zinc-500 uppercase font-bold">Target Description</label>
                                         <input 
                                             type="text" 
                                             value={prompt} 
                                             onChange={(e) => setPrompt(e.target.value)}
-                                            placeholder={activeModule === VFXModule.SKY_REPLACE ? "E.g. Sunset, Stormy Clouds" : "E.g. The car in the foreground"}
+                                            placeholder={activeModule === VFXModule.SKY_REPLACE ? "E.g. Sunset, Stormy Clouds" : activeModule === VFXModule.TERRAIN_AI ? "E.g. Cracked desert ground" : "E.g. The car in the foreground"}
                                             className="w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none"
                                         />
+                                    </div>
+                                )}
+
+                                {activeModule === VFXModule.TERRAIN_AI && (
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] text-zinc-500 uppercase font-bold">Terrain Preset</label>
+                                        <select 
+                                            className="w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-xs text-white focus:outline-none"
+                                            onChange={(e) => setModuleParams({...moduleParams, terrainType: e.target.value})}
+                                        >
+                                            <option value="">Custom (Use Prompt)</option>
+                                            <option value="desert">Dry Desert</option>
+                                            <option value="snow">Snowy Tundra</option>
+                                            <option value="grass">Lush Grassland</option>
+                                            <option value="mars">Red Mars Surface</option>
+                                            <option value="asphalt">City Asphalt</option>
+                                            <option value="water">Water / Ocean</option>
+                                        </select>
+                                    </div>
+                                )}
+
+                                {activeModule === VFXModule.AUTO_MAP && (
+                                    <div className="space-y-3 pt-2 border-t border-zinc-800">
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between text-[10px] text-zinc-500 uppercase font-bold">
+                                                <label>Texture Scale</label>
+                                                <span className="text-cyan-400">{moduleParams.textureScale || 1.0}x</span>
+                                            </div>
+                                            <input 
+                                                type="range" 
+                                                min="0.1" 
+                                                max="3.0" 
+                                                step="0.1"
+                                                defaultValue="1.0"
+                                                className="w-full accent-cyan-500 h-1 bg-zinc-800 rounded appearance-none"
+                                                onChange={(e) => setModuleParams({...moduleParams, textureScale: e.target.value})}
+                                            />
+                                        </div>
+                                        <div className="flex items-center justify-between">
+                                             <label className="text-[10px] text-zinc-500 uppercase font-bold">Depth Influence</label>
+                                             <label className="relative inline-flex items-center cursor-pointer">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={moduleParams.depthInfluence !== false} // Default true
+                                                    onChange={(e) => setModuleParams({...moduleParams, depthInfluence: e.target.checked})}
+                                                    className="sr-only peer" 
+                                                />
+                                                <div className="w-7 h-4 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-cyan-600"></div>
+                                            </label>
+                                        </div>
                                     </div>
                                 )}
 

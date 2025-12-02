@@ -1,4 +1,5 @@
 
+
 export enum ViewMode {
   EDITOR = 'EDITOR',
   SCRIPT = 'SCRIPT',
@@ -20,6 +21,7 @@ export enum ToolType {
 }
 
 export enum VFXModule {
+  // Closed Source / Commercial Engines
   GEN_FILL = 'GEN_FILL', // Adobe Firefly
   MAGIC_MASK = 'MAGIC_MASK', // DaVinci Resolve
   RELIGHT = 'RELIGHT', // Relight.AI
@@ -28,8 +30,18 @@ export enum VFXModule {
   DENOISE = 'DENOISE', // Topaz DeNoise
   SHARPEN = 'SHARPEN', // Topaz Sharpen
   NEURAL_FILTER = 'NEURAL_FILTER', // Photoshop Neural Filters
-  DEPTH_MAP = 'DEPTH_MAP' // Depth-AI
+  DEPTH_MAP = 'DEPTH_MAP', // Depth-AI
+  TERRAIN_AI = 'TERRAIN_AI', // Runway Inpainting / Terrain
+  AUTO_MAP = 'AUTO_MAP', // Luma AI Auto Mapping
+  
+  // Open Source / HuggingFace Engines
+  SAM3_SEGMENT = 'SAM3_SEGMENT', // Segment Anything Model 3 (Video)
+  WAN_INPAINT = 'WAN_INPAINT', // Wan 2.1 Inpainting
+  DEPTH_ANYTHING = 'DEPTH_ANYTHING', // Depth Anything V2
+  FLUX_FILL = 'FLUX_FILL' // Flux Fill
 }
+
+export type ModelSource = 'CLOSED' | 'OPEN';
 
 export interface MaskPoint {
   id: string;

@@ -1,6 +1,7 @@
 
+
 import { GoogleGenAI, FunctionDeclaration, Type, SchemaType } from "@google/genai";
-import { VFXModule, MaskPoint } from '../types';
+import { VFXModule, MaskPoint, ModelSource } from '../types';
 
 const getClient = () => {
   // Always create a new client to pick up the latest selected key if changed via window.aistudio
@@ -64,7 +65,11 @@ const toolsDeclaration: FunctionDeclaration[] = [
             'ADOBE_SENSEI', // General Auto-Edit
             'NOTEBOOK_LM', // Research/Scripting
             'RELIGHT_AI',
-            'ROTOBOT_AI'
+            'ROTOBOT_AI',
+            'RUNWAY_INPAINTING',
+            'LUMA_AUTO_MAP',
+            'SAM3_SEGMENT',
+            'WAN_INPAINT'
           ]
         }
       },
@@ -82,7 +87,7 @@ export const processVFXCommand = async (userPrompt: string): Promise<VFXCommand>
       contents: userPrompt,
       config: {
         tools: [{ functionDeclarations: toolsDeclaration }],
-        systemInstruction: "You are MunzGen AI Copilot. Map user requests to the most advanced AI engine available. For example, 'remove background' -> DAVINCI_MAGIC_MASK. 'Upscale' -> TOPAZ_VIDEO_AI. 'Create character' -> NANO_BANANA_PRO or VEO_2. 'Physics simulation' -> BLENDER_CYCLES. 'Relight scene' -> RELIGHT_AI. 'Auto rotoscope' -> ROTOBOT_AI.",
+        systemInstruction: "You are MunzGen AI Copilot. Map user requests to the most advanced AI engine available. For example, 'remove background' -> DAVINCI_MAGIC_MASK. 'Upscale' -> TOPAZ_VIDEO_AI. 'Create character' -> NANO_BANANA_PRO or VEO_2. 'Physics simulation' -> BLENDER_CYCLES. 'Relight scene' -> RELIGHT_AI. 'Auto rotoscope' -> ROTOBOT_AI. 'Change terrain' -> RUNWAY_INPAINTING. 'Map texture' -> LUMA_AUTO_MAP. 'Segment video' -> SAM3_SEGMENT. 'Inpaint object' -> WAN_INPAINT.",
       },
     });
 
@@ -137,6 +142,10 @@ export const generateVideo = async (
   if (engine === 'TOPAZ_VIDEO_AI') finalPrompt += " (4k resolution, ultra-sharp, noise reduction, artifact removal, 60fps smoothness).";
   if (engine === 'BLENDER_CYCLES') finalPrompt += " (3D Raytraced render, physically based materials, global illumination).";
   if (engine === 'RELIGHT_AI') finalPrompt += " (Physically correct lighting, raytraced shadows, HDR lighting map integration).";
+  if (engine === 'RUNWAY_INPAINTING') finalPrompt += " (Seamless inpainting, perspective-aware terrain replacement, maintains object consistency).";
+  if (engine === 'LUMA_AUTO_MAP') finalPrompt += " (Depth-aware texture mapping, structure preservation, photorealistic material blending).";
+  if (engine === 'SAM3_SEGMENT') finalPrompt += " (Segment Anything Model 3 style, extremely precise temporal video segmentation, pixel-perfect masks).";
+  if (engine === 'WAN_INPAINT') finalPrompt += " (Wan 2.1 Video Inpainting style, temporal consistency, fluid background fill).";
   
   try {
     let operation;
@@ -230,6 +239,7 @@ export const enhanceScene = async (
       module?: VFXModule;
       moduleParams?: any;
       maskPoints?: MaskPoint[];
+      modelSource?: ModelSource;
   },
   referenceImageBase64?: string
 ): Promise<string> => {
@@ -254,9 +264,15 @@ export const enhanceScene = async (
       fullPrompt += "Use these coordinates for precise spatial masking and alpha matte generation. ";
   }
 
+  // Handle Model Source (Open vs Closed) logic prefix
+  if (options.modelSource === 'OPEN') {
+    fullPrompt += " Using OPEN SOURCE MODEL pipeline simulation (HuggingFace Integration). ";
+  }
+
   // Professional AI Modules Logic
   if (options.module) {
       switch(options.module) {
+          // Closed Source Modules
           case VFXModule.GEN_FILL:
               fullPrompt += ` Adobe Firefly style generative fill. Intelligent object removal and replacement: ${basePrompt}. Seamless inpainting.`;
               break;
@@ -283,6 +299,35 @@ export const enhanceScene = async (
               break;
           case VFXModule.DEPTH_MAP:
               fullPrompt += ` Depth-AI style. Generate depth map visualization. 3D scene understanding. Parallax effect readiness.`;
+              break;
+          case VFXModule.TERRAIN_AI:
+              fullPrompt += ` Terrain AI style (Runway Inpainting). Intelligent ground plane replacement: ${basePrompt}. Perspective-correct texture mapping. Maintain object occlusion.`;
+              if (options.moduleParams?.terrainType) fullPrompt += ` Target Terrain: ${options.moduleParams.terrainType}.`;
+              break;
+          case VFXModule.AUTO_MAP:
+              fullPrompt += ` Auto Mapping style (Luma AI). Depth-aware video-to-video modification: ${basePrompt}. Intelligent structure preservation with retexturing.`;
+              if (options.moduleParams?.textureScale) {
+                  fullPrompt += ` Texture Scale: ${options.moduleParams.textureScale}x (Maintain texture density).`;
+              }
+              if (options.moduleParams?.depthInfluence !== false) {
+                  fullPrompt += ` Depth Influence: High (Strictly adhere to 3D scene geometry/depth map).`;
+              } else {
+                  fullPrompt += ` Depth Influence: Low (Allow structural hallucination).`;
+              }
+              break;
+              
+          // Open Source Modules
+          case VFXModule.SAM3_SEGMENT:
+              fullPrompt += ` SAM3 (Segment Anything Model 3) Mode. Generate high-precision segmentation masks for: ${basePrompt}. Output mask overlay or alpha channel. Zero-shot video segmentation.`;
+              break;
+          case VFXModule.WAN_INPAINT:
+              fullPrompt += ` Wan 2.1 Inpainting Mode. Fill masked area using Wan 2.1 video diffusion model: ${basePrompt}. High temporal consistency.`;
+              break;
+          case VFXModule.DEPTH_ANYTHING:
+              fullPrompt += ` Depth Anything V2 Mode. Monocular depth estimation. Generate grayscale depth map.`;
+              break;
+          case VFXModule.FLUX_FILL:
+              fullPrompt += ` Flux Fill Mode. High-fidelity inpainting and generation: ${basePrompt}. Strong prompt adherence.`;
               break;
       }
   }
